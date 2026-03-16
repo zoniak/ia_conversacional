@@ -13,3 +13,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 # Para cargar variables de entorno desde un archivo .env
 dotenvy = "0.15"
+# ... (mantén reqwest, tokio, serde, serde_json, dotenvy) ...
+axum = "0.7"
+tower-http = { version = "0.5", features = ["fs"] } # Para servir archivos HTML/CSS

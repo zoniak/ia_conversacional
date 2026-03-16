@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Chat con Gemini</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f4f4f9;
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+      }
+      #chat-container {
+        width: 100%;
+        max-width: 600px;
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        padding: 20px;
+      }
+      #messages {
+        height: 400px;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+      }
+      .msg {
+        margin-bottom: 10px;
+        padding: 10px;
+        border-radius: 5px;
+        width: fit-content;
+        max-width: 80%;
+      }
+      .user {
+        background-color: #d1e7dd;
+        margin-left: auto;
+      }
+      .bot {
+        background-color: #e2e3e5;
+        margin-right: auto;
+      }
+      .input-area {
+        display: flex;
+        gap: 10px;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+      }
+      button {
+        padding: 10px 20px;
+        background-color: #0d6efd;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="chat-container">
+      <h2 style="text-align: center; margin-top: 0">Jack chat</h2>
+      <div id="messages"></div>
+      <div class="input-area">
+        <input
+          type="text"
+          id="user-input"
+          placeholder="Escribe tu mensaje..."
+          onkeypress="if (event.key === 'Enter') enviarMensaje();"
+        />
+        <button onclick="enviarMensaje()">Enviar</button>
+      </div>
+    </div>
+
+    <script>
+      // El navegador será el encargado de recordar la conversación
+      let historial = [];
+
+      async function enviarMensaje() {
+        const inputElement = document.getElementById("user-input");
+        const texto = inputElement.value.trim();
+        if (!texto) return;
+
+        // 1. Mostrar mensaje del usuario y limpiar input
+        añadirMensajeAlDOM("Tú", texto, "user");
+        inputElement.value = "";
+
+        // 2. Añadir al historial
+        historial.push({ role: "user", parts: [{ text: texto }] });
+
+        // 3. Enviar todo el historial a nuestro servidor Rust
+        try {
+          const respuesta = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(historial),
+          });
+
+          const data = await respuesta.json();
+
+          // 4. Mostrar respuesta de Gemini y añadirla al historial
+          añadirMensajeAlDOM("Jack Sparrow", data.texto, "bot");
+          historial.push({ role: "model", parts: [{ text: data.texto }] });
+        } catch (error) {
+          añadirMensajeAlDOM("Sistema", "Error de conexión.", "bot");
+          historial.pop(); // Revertimos si hay error
+        }
+      }
+
+      function añadirMensajeAlDOM(emisor, texto, claseCSS) {
+        const div = document.createElement("div");
+        div.className = `msg ${claseCSS}`;
+        div.innerText = `${emisor}: ${texto}`;
+        document.getElementById("messages").appendChild(div);
+        // Hacer scroll automático hacia abajo
+        document.getElementById("messages").scrollTop =
+          document.getElementById("messages").scrollHeight;
+      }
+    </script>
+  </body>
+</html>

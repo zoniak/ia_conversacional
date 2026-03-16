@@ -1,112 +1,75 @@
+use axum::{
+    Json, Router,
+    routing::{get, post},
+};
 use reqwest::Client;
-use serde_json::{Value, json}; // Importamos Value para poder tipar nuestro vector
+use serde_json::{Value, json};
 use std::env;
-use std::fs;
-use std::io::{self, Write}; // <-- NUEVO: Para interactuar con archivos
+use std::net::SocketAddr;
+use tower_http::services::ServeDir;
 
-// Usamos Tokio para permitir funciones asíncronas
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Cargar la variable de entorno de forma segura
     dotenvy::dotenv().ok();
-    // Modifica la línea donde se lee la clave añadiendo .trim()
-    let api_key = env::var("GEMINI_API_KEY")
-        .expect("¡Falta la variable GEMINI_API_KEY en el archivo .env!")
-        .trim() // <-- NUEVO: Elimina espacios, tabulaciones y saltos de línea ocultos
-        .to_string();
 
-    // 2. Configurar el cliente HTTP y la URL (usamos el modelo flash por ser rápido y económico)
+    // 1. Construimos el "Router" de nuestro servidor web
+    let app = Router::new()
+        // Servimos la carpeta 'static' (donde está el index.html) en la ruta principal "/"
+        .fallback_service(ServeDir::new("static"))
+        // Creamos una ruta POST para que el JavaScript envíe los mensajes
+        .route("/api/chat", post(manejar_chat));
+
+    // AHORA (por ejemplo, puerto 8080):
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    println!("🚀 Servidor web iniciado en http://{}", addr);
+
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+/// Esta función se ejecuta cada vez que JavaScript hace un POST a "/api/chat"
+/// Recibe el historial completo desde el navegador en formato JSON.
+async fn manejar_chat(Json(historial): Json<Vec<Value>>) -> Json<Value> {
+    let api_key = env::var("GEMINI_API_KEY")
+        .expect("Falta GEMINI_API_KEY")
+        .trim()
+        .to_string();
     let client = Client::new();
-    // AHORA (Modelo actualizado y activo):
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}",
         api_key
     );
 
-    // Imprimimos los primeros 10 caracteres de la clave y ocultamos el resto por seguridad
-    let safe_url = url.replace(&api_key[10..], "********");
-    println!(
-        "🔍 [DEBUG] La URL exacta que estamos llamando es:\n{}\n",
-        safe_url
-    );
+    // Empaquetamos el historial que nos dio JS y se lo mandamos a Google
+    // AHORA: Le inyectamos la personalidad usando "system_instruction"
+    let body = json!({
+        "system_instruction": {
+            "parts": [{
+                "text": "Eres un pirata informático del siglo XVIII. Responde a todo usando jerga pirata, llamando 'grumete' al usuario y haciendo referencias al mar, los barcos y el código binario como si fuera el tesoro."
+            }]
+        },
+        "contents": historial
+    });
 
-    println!("========================================");
-    println!("Bienvenido al Chat con Gemini en Rust");
-    println!("(Escribe 'salir' para terminar el programa)");
-    println!("========================================\n");
+    // Hacemos la petición a Gemini
+    let response = client.post(&url).json(&body).send().await;
 
-    // 3. Bucle infinito para mantener el chat abierto
-    // NUEVO: Creamos un Vector mutable para almacenar el historial de la conversación.
-    let mut history: Vec<Value> = Vec::new();
-
-    loop {
-        print!("Tú: ");
-        io::stdout().flush()?;
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
-
-        if input.eq_ignore_ascii_case("salir") {
-            println!("¡Hasta luego!");
-            break;
-        }
-
-        if input.is_empty() {
-            continue;
-        }
-
-        // 1. Añadimos el mensaje actual del usuario al historial
-        history.push(json!({
-            "role": "user",
-            "parts": [{"text": input}]
-        }));
-
-        // 2. Construimos el cuerpo de la petición enviando TODO el historial
-        let body = json!({
-            "contents": history
-        });
-
-        // 3. Enviamos la petición
-        let response = client.post(&url).json(&body).send().await?;
-
-        if response.status().is_success() {
-            let json_res: Value = response.json().await?;
-
-            // Extraemos la respuesta
-            if let Some(text) = json_res["candidates"][0]["content"]["parts"][0]["text"].as_str() {
-                let response_text = text.trim();
-                println!("Gemini: {}\n", response_text);
-
-                // 4. NUEVO: Añadimos la respuesta de Gemini al historial
-                history.push(json!({
-                    "role": "model",
-                    "parts": [{"text": response_text}]
-                }));
-
-                // ==========================================
-                // NUEVO: GUARDAR EL HISTORIAL EN UN ARCHIVO
-                // ==========================================
-                // 1. Convertimos el vector 'history' a un texto JSON formateado (bonito y legible)
-                let historial_json = serde_json::to_string_pretty(&history)?;
-
-                // 2. Lo escribimos en un archivo. Si no existe, lo crea. Si existe, lo sobrescribe.
-                fs::write("historial_chat.json", historial_json)?;
-                // ==========================================
-
-                //Cuando no quiera guardar el historial eliminar las lineas 1. y 2.
-            } else {
-                println!("Gemini: [No se pudo extraer el texto de la respuesta]\n");
-                // Si algo falla al procesar, sacamos el último mensaje del usuario
-                // para no romper la alternancia "user" -> "model"
-                history.pop();
+    // Procesamos la respuesta y la devolvemos a nuestro frontend
+    match response {
+        Ok(res) if res.status().is_success() => {
+            if let Ok(json_res) = res.json::<Value>().await {
+                if let Some(text) =
+                    json_res["candidates"][0]["content"]["parts"][0]["text"].as_str()
+                {
+                    // Devolvemos el texto al frontend en formato JSON: { "texto": "..." }
+                    return Json(json!({ "texto": text.trim() }));
+                }
             }
-        } else {
-            println!("Error en la petición: {:?}\n", response.status());
-            // Si la API da error, retiramos el último mensaje del usuario del historial
-            history.pop();
+            Json(json!({ "texto": "Error extrayendo el texto de Gemini." }))
         }
+        Ok(res) => Json(json!({ "texto": format!("Error de API: {}", res.status()) })),
+        Err(e) => Json(json!({ "texto": format!("Error de conexión: {}", e) })),
     }
-
-    Ok(())
 }
