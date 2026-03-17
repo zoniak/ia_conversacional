@@ -1,2 +1,3 @@
 .env
 historial_chat.json
+target/doc
