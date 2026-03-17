@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // AHORA (por ejemplo, puerto 8080):
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-    println!("🚀 Servidor web iniciado en http://{}", addr);
+    println!("Servidor web iniciado en http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
